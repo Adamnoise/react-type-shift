@@ -14,10 +14,12 @@ export class JSXConverter {
   static async convertJSXtoTSX(jsxCode: string): Promise<string> {
     try {
       // Use the advanced converter implementation
-      return convertJSXToTSX(jsxCode);
+      const result = convertJSXToTSX(jsxCode);
+      console.log("Conversion successful");
+      return result;
     } catch (error) {
       console.error("Error in JSX to TSX conversion:", error);
-      throw new Error("Failed to convert JSX to TSX");
+      throw new Error(`Failed to convert JSX to TSX: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 }
