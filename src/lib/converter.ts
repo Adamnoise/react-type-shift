@@ -74,14 +74,13 @@ const createTypeInterface = (componentName: string, propTypes: any): string => {
  * Adds TypeScript type annotations to React components
  */
 const addTypeAnnotationToFunction = (path: any, componentName: string, hasProps: boolean) => {
-  // Add return type annotation
-  path.node.returnType = t.tsTypeAnnotation(
-    t.tsTypeReference(
-      t.identifier('JSX.Element')
-    )
-  );
+  // Biztosítsuk, hogy a node és a megfelelő tulajdonságok léteznek
+  if (!path || !path.node) {
+    console.log("Warning: Trying to add type annotation to undefined node");
+    return;
+  }
 
-  // Add type annotation to the function
+  // Add type annotation to the function parameters
   if (hasProps) {
     if (path.node.params && path.node.params.length > 0) {
       if (t.isArrowFunctionExpression(path.node)) {
@@ -90,12 +89,22 @@ const addTypeAnnotationToFunction = (path: any, componentName: string, hasProps:
           const paramName = 'props';
           const props = path.node.params[0];
           path.node.params[0] = t.identifier(`${paramName}: ${componentName}Props`);
-          path.node.body = t.blockStatement([
-            t.variableDeclaration('const', [
-              t.variableDeclarator(props, t.identifier(paramName))
-            ]),
-            ...(t.isBlockStatement(path.node.body) ? path.node.body.body : [t.returnStatement(path.node.body)])
-          ]);
+          
+          // Ensure body is a block statement
+          if (!t.isBlockStatement(path.node.body)) {
+            path.node.body = t.blockStatement([
+              t.variableDeclaration('const', [
+                t.variableDeclarator(props, t.identifier(paramName))
+              ]),
+              t.returnStatement(path.node.body)
+            ]);
+          } else {
+            path.node.body.body.unshift(
+              t.variableDeclaration('const', [
+                t.variableDeclarator(props, t.identifier(paramName))
+              ])
+            );
+          }
         } else {
           path.node.params[0] = t.identifier(`props: ${componentName}Props`);
         }
@@ -126,7 +135,57 @@ const addTypeAnnotationToFunction = (path: any, componentName: string, hasProps:
       }
     }
   }
+
+  // Add return type annotation - csak akkor ha a node megfelelő típusú
+  if (t.isArrowFunctionExpression(path.node) || t.isFunctionDeclaration(path.node)) {
+    path.node.returnType = t.tsTypeAnnotation(
+      t.tsTypeReference(
+        t.identifier('JSX.Element')
+      )
+    );
+  }
 };
+
+/**
+ * Helper function to check if a node is likely a React component
+ */
+function isReactComponent(node: any): boolean {
+  // Check if function has JSX in its body
+  let hasJSX = false;
+  
+  traverse.cheap(node, (subNode) => {
+    if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
+      hasJSX = true;
+    }
+  });
+  
+  return hasJSX;
+}
+
+/**
+ * Helper function to check if a function is likely a React function component
+ */
+function isReactFunction(node: any): boolean {
+  // Check if function returns JSX
+  let hasJSX = false;
+  
+  if (t.isBlockStatement(node.body)) {
+    traverse.cheap(node.body, (subNode) => {
+      if (t.isJSXElement(subNode) || t.isJSXFragment(subNode) || t.isReturnStatement(subNode)) {
+        if (t.isReturnStatement(subNode) && subNode.argument && 
+          (t.isJSXElement(subNode.argument) || t.isJSXFragment(subNode.argument))) {
+          hasJSX = true;
+        } else if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
+          hasJSX = true;
+        }
+      }
+    });
+  } else if (t.isJSXElement(node.body) || t.isJSXFragment(node.body)) {
+    hasJSX = true;
+  }
+  
+  return hasJSX;
+}
 
 /**
  * Main conversion function
@@ -163,6 +222,7 @@ export const convertJSXToTSX = (code: string): string => {
       },
       VariableDeclarator(path) {
         if (t.isIdentifier(path.node.id) && 
+            path.node.init &&
             (t.isArrowFunctionExpression(path.node.init) || 
              t.isFunctionExpression(path.node.init)) && 
             isReactFunction(path.node.init)) {
@@ -226,16 +286,21 @@ export const convertJSXToTSX = (code: string): string => {
       VariableDeclarator(path) {
         if (
           t.isIdentifier(path.node.id) &&
+          path.node.init &&
           (t.isArrowFunctionExpression(path.node.init) || t.isFunctionExpression(path.node.init))
         ) {
           const componentName = path.node.id.name;
           if (componentNames.has(componentName)) {
             const hasProps = componentHasProps.get(componentName) || false;
-            addTypeAnnotationToFunction(path.node.init, componentName, hasProps);
-            
-            // If no PropTypes were found but component exists, add empty interface
-            if (!componentHasProps.has(componentName) && !interfaces.some(i => i.includes(`interface ${componentName}Props`))) {
-              interfaces.push(`interface ${componentName}Props {}`);
+            try {
+              addTypeAnnotationToFunction(path.node.init, componentName, hasProps);
+              
+              // If no PropTypes were found but component exists, add empty interface
+              if (!componentHasProps.has(componentName) && !interfaces.some(i => i.includes(`interface ${componentName}Props`))) {
+                interfaces.push(`interface ${componentName}Props {}`);
+              }
+            } catch (error) {
+              console.error(`Error adding type annotation to ${componentName}:`, error);
             }
           }
         }
@@ -270,44 +335,3 @@ export const convertJSXToTSX = (code: string): string => {
     throw new Error(`Failed to convert JSX to TSX: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 };
-
-/**
- * Helper function to check if a node is likely a React component
- */
-function isReactComponent(node: any): boolean {
-  // Check if function has JSX in its body
-  let hasJSX = false;
-  
-  traverse.cheap(node, (subNode) => {
-    if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
-      hasJSX = true;
-    }
-  });
-  
-  return hasJSX;
-}
-
-/**
- * Helper function to check if a function is likely a React function component
- */
-function isReactFunction(node: any): boolean {
-  // Check if function returns JSX
-  let hasJSX = false;
-  
-  if (t.isBlockStatement(node.body)) {
-    traverse.cheap(node.body, (subNode) => {
-      if (t.isJSXElement(subNode) || t.isJSXFragment(subNode) || t.isReturnStatement(subNode)) {
-        if (t.isReturnStatement(subNode) && subNode.argument && 
-           (t.isJSXElement(subNode.argument) || t.isJSXFragment(subNode.argument))) {
-          hasJSX = true;
-        } else if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
-          hasJSX = true;
-        }
-      }
-    });
-  } else if (t.isJSXElement(node.body) || t.isJSXFragment(node.body)) {
-    hasJSX = true;
-  }
-  
-  return hasJSX;
-}
