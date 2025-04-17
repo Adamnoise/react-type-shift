@@ -1,14 +1,14 @@
 
 import { useEffect, useState } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import { Prism as PrismSyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-interface SyntaxHighlighterProps {
+interface CodeHighlighterProps {
   code: string;
   language: string;
 }
 
-export const SyntaxHighlighter = ({ code, language }: SyntaxHighlighterProps) => {
+export const SyntaxHighlighter = ({ code, language }: CodeHighlighterProps) => {
   const [mounted, setMounted] = useState(false);
 
   // Avoid hydration issues with syntax highlighting
@@ -21,7 +21,7 @@ export const SyntaxHighlighter = ({ code, language }: SyntaxHighlighterProps) =>
   }
 
   return (
-    <SyntaxHighlighter 
+    <PrismSyntaxHighlighter 
       language={language} 
       style={vscDarkPlus}
       customStyle={{
@@ -34,6 +34,6 @@ export const SyntaxHighlighter = ({ code, language }: SyntaxHighlighterProps) =>
       wrapLongLines={true}
     >
       {code || "// No code to display"}
-    </SyntaxHighlighter>
+    </PrismSyntaxHighlighter>
   );
 };
