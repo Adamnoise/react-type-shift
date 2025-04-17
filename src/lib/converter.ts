@@ -1,4 +1,3 @@
-
 import * as parser from '@babel/parser';
 import traverse from '@babel/traverse';
 import generate from '@babel/generator';
@@ -10,45 +9,48 @@ import * as t from '@babel/types';
 const propTypeToTSType = (propType: any): string => {
   if (t.isMemberExpression(propType)) {
     const property = propType.property as t.Identifier;
-    
+
     // Handle isRequired
     if (property.name === 'isRequired' && t.isMemberExpression(propType.object)) {
       return propTypeToTSType(propType.object);
     }
-    
+
     // Handle PropTypes.X
-    if (t.isMemberExpression(propType) && 
-        t.isIdentifier(propType.object) && 
-        propType.object.name === 'PropTypes') {
-      
-      if (t.isIdentifier(property)) {
-        switch (property.name) {
-          case 'string': return 'string';
-          case 'number': return 'number';
-          case 'bool': return 'boolean';
-          case 'func': return 'Function';
-          case 'array': return 'any[]';
-          case 'object': return 'Record<string, unknown>';
-          case 'node': return 'React.ReactNode';
-          case 'element': return 'React.ReactElement';
-          case 'any': return 'unknown';
-          case 'arrayOf': 
-            // Handle array types if possible
-            return 'Array<unknown>';
-          case 'shape':
-            // Complex shapes would need more processing
-            return 'Record<string, unknown>'; 
-          case 'oneOf':
-          case 'oneOfType':
-            // Union types would need more processing
-            return 'unknown';
-          default:
-            return 'unknown';
-        }
+    if (
+      t.isIdentifier(propType.object) &&
+      propType.object.name === 'PropTypes' &&
+      t.isIdentifier(property)
+    ) {
+      switch (property.name) {
+        case 'string':
+          return 'string';
+        case 'number':
+          return 'number';
+        case 'bool':
+          return 'boolean';
+        case 'func':
+          return '(...args: any[]) => any';
+        case 'array':
+          return 'any[]';
+        case 'object':
+          return 'Record<string, any>';
+        case 'node':
+          return 'React.ReactNode';
+        case 'element':
+          return 'React.ReactElement';
+        case 'any':
+          return 'any';
+        case 'arrayOf':
+        case 'shape':
+        case 'oneOf':
+        case 'oneOfType':
+          return 'any'; // Extend later if needed
+        default:
+          return 'any';
       }
     }
   }
-  return 'unknown';
+  return 'any';
 };
 
 /**
@@ -56,13 +58,13 @@ const propTypeToTSType = (propType: any): string => {
  */
 const createTypeInterface = (componentName: string, propTypes: any): string => {
   const properties: string[] = [];
-  
+
   Object.entries(propTypes).forEach(([key, value]: [string, any]) => {
-    // Check if prop is required
-    const isRequired = t.isMemberExpression(value) && 
-                      t.isIdentifier(value.property) &&
-                      value.property.name === 'isRequired';
-    
+    const isRequired =
+      t.isMemberExpression(value) &&
+      t.isIdentifier(value.property) &&
+      value.property.name === 'isRequired';
+
     const type = propTypeToTSType(isRequired ? value.object : value);
     properties.push(`  ${key}${isRequired ? '' : '?'}: ${type};`);
   });
@@ -71,267 +73,192 @@ const createTypeInterface = (componentName: string, propTypes: any): string => {
 };
 
 /**
- * Adds TypeScript type annotations to React components
+ * Adds TS annotations to function-based React components
  */
 const addTypeAnnotationToFunction = (path: any, componentName: string, hasProps: boolean) => {
-  // Biztosítsuk, hogy a node és a megfelelő tulajdonságok léteznek
-  if (!path || !path.node) {
-    console.log("Warning: Trying to add type annotation to undefined node");
-    return;
-  }
+  if (!path || !path.node) return;
 
-  // Add type annotation to the function parameters
-  if (hasProps) {
-    if (path.node.params && path.node.params.length > 0) {
-      if (t.isArrowFunctionExpression(path.node)) {
-        // For destructured props
-        if (t.isObjectPattern(path.node.params[0])) {
-          const paramName = 'props';
-          const props = path.node.params[0];
-          path.node.params[0] = t.identifier(`${paramName}: ${componentName}Props`);
-          
-          // Ensure body is a block statement
-          if (!t.isBlockStatement(path.node.body)) {
-            path.node.body = t.blockStatement([
-              t.variableDeclaration('const', [
-                t.variableDeclarator(props, t.identifier(paramName))
-              ]),
-              t.returnStatement(path.node.body)
-            ]);
+  const applyProps = () => t.identifier(`props: ${componentName}Props`);
+
+  const wrapDestructuredProps = (props: t.ObjectPattern) => {
+    const paramName = 'props';
+    return {
+      param: t.identifier(`${paramName}: ${componentName}Props`),
+      unpack: t.variableDeclaration('const', [
+        t.variableDeclarator(props, t.identifier(paramName)),
+      ]),
+    };
+  };
+
+  const annotate = (fn: any) => {
+    if (hasProps) {
+      if (fn.params && fn.params.length > 0) {
+        if (t.isObjectPattern(fn.params[0])) {
+          const { param, unpack } = wrapDestructuredProps(fn.params[0]);
+          fn.params[0] = param;
+
+          if (t.isBlockStatement(fn.body)) {
+            fn.body.body.unshift(unpack);
           } else {
-            path.node.body.body.unshift(
-              t.variableDeclaration('const', [
-                t.variableDeclarator(props, t.identifier(paramName))
-              ])
-            );
+            fn.body = t.blockStatement([unpack, t.returnStatement(fn.body)]);
           }
         } else {
-          path.node.params[0] = t.identifier(`props: ${componentName}Props`);
+          fn.params[0] = applyProps();
         }
-      } else if (t.isFunctionDeclaration(path.node)) {
-        if (t.isObjectPattern(path.node.params[0])) {
-          const paramName = 'props';
-          const props = path.node.params[0];
-          path.node.params[0] = t.identifier(`${paramName}: ${componentName}Props`);
-          path.node.body.body.unshift(
-            t.variableDeclaration('const', [
-              t.variableDeclarator(props, t.identifier(paramName))
-            ])
-          );
-        } else {
-          path.node.params[0] = t.identifier(`props: ${componentName}Props`);
-        }
+      } else {
+        fn.params = [applyProps()];
       }
+    } else if (fn.params.length === 0) {
+      fn.params = [applyProps()];
     }
-  } else {
-    // Add empty props interface for components with no props
-    if (t.isArrowFunctionExpression(path.node)) {
-      if (path.node.params.length === 0) {
-        path.node.params.push(t.identifier(`props: ${componentName}Props`));
-      }
-    } else if (t.isFunctionDeclaration(path.node)) {
-      if (path.node.params.length === 0) {
-        path.node.params.push(t.identifier(`props: ${componentName}Props`));
-      }
-    }
-  }
 
-  // Add return type annotation - csak akkor ha a node megfelelő típusú
-  if (t.isArrowFunctionExpression(path.node) || t.isFunctionDeclaration(path.node)) {
-    path.node.returnType = t.tsTypeAnnotation(
-      t.tsTypeReference(
-        t.identifier('JSX.Element')
-      )
-    );
-  }
+    fn.returnType = t.tsTypeAnnotation(t.tsTypeReference(t.identifier('JSX.Element')));
+  };
+
+  annotate(path.node);
 };
 
 /**
- * Helper function to check if a node is likely a React component
- */
-function isReactComponent(node: any): boolean {
-  // Check if function has JSX in its body
-  let hasJSX = false;
-  
-  traverse.cheap(node, (subNode) => {
-    if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
-      hasJSX = true;
-    }
-  });
-  
-  return hasJSX;
-}
-
-/**
- * Helper function to check if a function is likely a React function component
- */
-function isReactFunction(node: any): boolean {
-  // Check if function returns JSX
-  let hasJSX = false;
-  
-  if (t.isBlockStatement(node.body)) {
-    traverse.cheap(node.body, (subNode) => {
-      if (t.isJSXElement(subNode) || t.isJSXFragment(subNode) || t.isReturnStatement(subNode)) {
-        if (t.isReturnStatement(subNode) && subNode.argument && 
-          (t.isJSXElement(subNode.argument) || t.isJSXFragment(subNode.argument))) {
-          hasJSX = true;
-        } else if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
-          hasJSX = true;
-        }
-      }
-    });
-  } else if (t.isJSXElement(node.body) || t.isJSXFragment(node.body)) {
-    hasJSX = true;
-  }
-  
-  return hasJSX;
-}
-
-/**
- * Main conversion function
+ * Converts JSX to TSX using AST transformation
  */
 export const convertJSXToTSX = (code: string): string => {
   try {
-    // Parse JSX code into an AST
     const ast = parser.parse(code, {
       sourceType: 'module',
       plugins: ['jsx', 'typescript'],
     });
 
     let interfaces: string[] = [];
+    const componentNames = new Set<string>();
+    const componentHasProps = new Map<string, boolean>();
     let hasReactImport = false;
-    let hasPropTypesImport = false;
-    let componentNames = new Set<string>();
-    let componentHasProps = new Map<string, boolean>();
 
-    // First pass - collect component names and detect PropTypes
+    // Collect data and strip propTypes
     traverse(ast, {
       ImportDeclaration(path) {
-        if (path.node.source.value === 'react') {
-          hasReactImport = true;
-        }
-        if (path.node.source.value === 'prop-types') {
-          hasPropTypesImport = true;
-        }
+        if (path.node.source.value === 'react') hasReactImport = true;
       },
       FunctionDeclaration(path) {
-        if (path.node.id && t.isIdentifier(path.node.id) && 
-            isReactComponent(path.node)) {
+        if (path.node.id && isReactComponent(path.node)) {
           componentNames.add(path.node.id.name);
-        }
-      },
-      VariableDeclarator(path) {
-        if (t.isIdentifier(path.node.id) && 
-            path.node.init &&
-            (t.isArrowFunctionExpression(path.node.init) || 
-             t.isFunctionExpression(path.node.init)) && 
-            isReactFunction(path.node.init)) {
-          componentNames.add(path.node.id.name);
-        }
-      },
-      AssignmentExpression(path) {
-        if (
-          t.isMemberExpression(path.node.left) &&
-          t.isIdentifier(path.node.left.property) &&
-          path.node.left.property.name === 'propTypes' &&
-          t.isIdentifier(path.node.left.object)
-        ) {
-          const componentName = path.node.left.object.name;
-          componentHasProps.set(componentName, true);
-          
-          // Get the properties from the right side
-          if (t.isObjectExpression(path.node.right)) {
-            const propTypes = path.node.right.properties.reduce((acc: any, prop: any) => {
-              if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
-                acc[prop.key.name] = prop.value;
-              }
-              return acc;
-            }, {});
-            
-            const interfaceStr = createTypeInterface(componentName, propTypes);
-            interfaces.push(interfaceStr);
-          }
-          
-          // Remove PropTypes assignment
-          path.remove();
-        }
-      }
-    });
-
-    // Remove PropTypes import
-    traverse(ast, {
-      ImportDeclaration(path) {
-        if (path.node.source.value === 'prop-types') {
-          path.remove();
-        }
-      }
-    });
-
-    // Second pass - add type annotations to components
-    traverse(ast, {
-      FunctionDeclaration(path) {
-        if (path.node.id && t.isIdentifier(path.node.id)) {
-          const componentName = path.node.id.name;
-          if (componentNames.has(componentName)) {
-            const hasProps = componentHasProps.get(componentName) || false;
-            addTypeAnnotationToFunction(path, componentName, hasProps);
-            
-            // If no PropTypes were found but component exists, add empty interface
-            if (!componentHasProps.has(componentName) && !interfaces.some(i => i.includes(`interface ${componentName}Props`))) {
-              interfaces.push(`interface ${componentName}Props {}`);
-            }
-          }
         }
       },
       VariableDeclarator(path) {
         if (
           t.isIdentifier(path.node.id) &&
           path.node.init &&
-          (t.isArrowFunctionExpression(path.node.init) || t.isFunctionExpression(path.node.init))
+          (t.isArrowFunctionExpression(path.node.init) ||
+            t.isFunctionExpression(path.node.init)) &&
+          isReactFunction(path.node.init)
         ) {
-          const componentName = path.node.id.name;
-          if (componentNames.has(componentName)) {
-            const hasProps = componentHasProps.get(componentName) || false;
-            try {
-              addTypeAnnotationToFunction(path.node.init, componentName, hasProps);
-              
-              // If no PropTypes were found but component exists, add empty interface
-              if (!componentHasProps.has(componentName) && !interfaces.some(i => i.includes(`interface ${componentName}Props`))) {
-                interfaces.push(`interface ${componentName}Props {}`);
-              }
-            } catch (error) {
-              console.error(`Error adding type annotation to ${componentName}:`, error);
-            }
-          }
+          componentNames.add(path.node.id.name);
         }
-      }
+      },
+      AssignmentExpression(path) {
+        const left = path.node.left;
+        const right = path.node.right;
+
+        if (
+          t.isMemberExpression(left) &&
+          t.isIdentifier(left.property, { name: 'propTypes' }) &&
+          t.isIdentifier(left.object) &&
+          t.isObjectExpression(right)
+        ) {
+          const componentName = left.object.name;
+          componentHasProps.set(componentName, true);
+
+          const propTypes = right.properties.reduce((acc: any, prop: any) => {
+            if (t.isObjectProperty(prop) && t.isIdentifier(prop.key)) {
+              acc[prop.key.name] = prop.value;
+            }
+            return acc;
+          }, {});
+
+          interfaces.push(createTypeInterface(componentName, propTypes));
+          path.remove(); // remove PropTypes assignment
+        }
+      },
+      ImportDeclaration(path) {
+        if (path.node.source.value === 'prop-types') {
+          path.remove(); // remove PropTypes import
+        }
+      },
     });
 
-    // Generate TypeScript code from transformed AST
+    // Add typing annotations to components
+    traverse(ast, {
+      FunctionDeclaration(path) {
+        const name = path.node.id?.name;
+        if (name && componentNames.has(name)) {
+          const hasProps = componentHasProps.get(name) || false;
+          addTypeAnnotationToFunction(path, name, hasProps);
+          if (!hasProps) interfaces.push(`interface ${name}Props {}`);
+        }
+      },
+      VariableDeclarator(path) {
+        const name = t.isIdentifier(path.node.id) ? path.node.id.name : '';
+        if (
+          name &&
+          componentNames.has(name) &&
+          path.node.init &&
+          (t.isArrowFunctionExpression(path.node.init) || t.isFunctionExpression(path.node.init))
+        ) {
+          try {
+            const hasProps = componentHasProps.get(name) || false;
+            addTypeAnnotationToFunction({ node: path.node.init }, name, hasProps);
+            if (!hasProps) interfaces.push(`interface ${name}Props {}`);
+          } catch (error) {
+            console.error(`Annotation failed for ${name}:`, error);
+          }
+        }
+      },
+    });
+
     const output = generate(ast, {
       retainLines: true,
       comments: true,
     });
 
-    // Construct the final output
-    let result = '';
-    
-    // Add React import if needed
-    if (!hasReactImport) {
-      result += `import React from 'react';\n\n`;
-    }
-
-    // Add interfaces
-    if (interfaces.length > 0) {
-      result += `${interfaces.join('\n\n')}\n\n`;
-    }
-
-    // Add the main component code
-    result += output.code;
-
-    return result;
+    return [
+      !hasReactImport ? `import React from 'react';\n` : '',
+      interfaces.join('\n\n') + '\n\n',
+      output.code,
+    ].join('');
   } catch (error) {
-    console.error('Error converting JSX to TSX:', error);
-    throw new Error(`Failed to convert JSX to TSX: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    console.error('Conversion failed:', error);
+    throw new Error(`JSX ➝ TSX failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 };
+
+/**
+ * Checks if a function likely returns JSX
+ */
+function isReactFunction(node: any): boolean {
+  if (t.isBlockStatement(node.body)) {
+    let found = false;
+    traverse.cheap(node.body, (subNode) => {
+      if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) found = true;
+      if (
+        t.isReturnStatement(subNode) &&
+        (t.isJSXElement(subNode.argument) || t.isJSXFragment(subNode.argument))
+      ) {
+        found = true;
+      }
+    });
+    return found;
+  }
+  return t.isJSXElement(node.body) || t.isJSXFragment(node.body);
+}
+
+/**
+ * Checks if a FunctionDeclaration has JSX
+ */
+function isReactComponent(node: any): boolean {
+  let hasJSX = false;
+  traverse.cheap(node, (subNode) => {
+    if (t.isJSXElement(subNode) || t.isJSXFragment(subNode)) {
+      hasJSX = true;
+    }
+  });
+  return hasJSX;
+}
