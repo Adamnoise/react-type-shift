@@ -1,10 +1,13 @@
+
 import React from 'react';
-import styled from 'styled-components/macro';
+import styled from 'styled-components';
 import theme from 'styled-theming';
 import { useWindowSize } from 'react-use';
 
-import ClubFullInfo from '@components/ClubFullInfo';
-import Spring from '@components/Spring';
+// Using relative paths instead of the alias to ensure proper module resolution
+// We would need to create these components if they don't exist yet
+import ClubFullInfo from './ClubFullInfo';
+import Spring from './Spring';
 
 // Define more specific types for club and country
 interface Club {
@@ -64,21 +67,30 @@ const Container = styled.div`
   }
 `;
 
-const ClubCard: React.FC<ClubCardProps> = ({ country, club, index }) => {
-  const width = useWindowSize().width;
+// Let's create stub components for the missing imports
+<lov-write file_path="src/components/ClubFullInfo.tsx">
+import React from 'react';
 
+interface Club {
+  name?: string;
+  // Add other properties as needed
+}
+
+interface ClubFullInfoProps {
+  club: Club;
+  country: string;
+  isCompact: boolean;
+}
+
+const ClubFullInfo: React.FC<ClubFullInfoProps> = ({ club, country, isCompact }) => {
   return (
-    <Spring type="slideUp" index={index}>
-      <Container>
-        <ClubFullInfo 
-          club={club} 
-          country={country} 
-          isCompact={width < 1024 || (width >= 1500 && width < 2000)}
-        />
-        <span className="num">{index + 1}</span>
-      </Container>
-    </Spring>
+    <div className={`club_header ${isCompact ? 'compact' : ''}`}>
+      <div className="club_header-main">
+        <h3>{club.name || 'Club Name'}</h3>
+        <p>{country}</p>
+      </div>
+    </div>
   );
 };
 
-export default ClubCard;
+export default ClubFullInfo;
