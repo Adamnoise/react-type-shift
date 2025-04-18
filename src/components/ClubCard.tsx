@@ -1,7 +1,7 @@
 
 import React from 'react';
 import styled from 'styled-components';
-import theme from 'styled-theming';
+import theme from 'styled-theming'; // Ensure this import is correct
 import { useWindowSize } from 'react-use';
 
 // Using relative paths instead of the alias to ensure proper module resolution
