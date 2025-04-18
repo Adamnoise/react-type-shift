@@ -1,4 +1,3 @@
-
 /**
  * JSX to TSX Converter Module
  * This module handles the conversion of JSX code to TypeScript TSX
@@ -6,7 +5,7 @@
 import { convertJSXToTSX } from './converter';
 import { ConversionConfig, ConversionErrorDetails } from './types';
 import { generateErrorDetails } from './utils/errorReporter';
-import JSZip from 'jszip';
+import * as JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 
 export class JSXConverter {
