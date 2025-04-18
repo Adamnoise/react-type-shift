@@ -1,10 +1,9 @@
-
 import { useState, useMemo } from "react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ArrowLeftRight, Copy } from "lucide-react";
 import { toast } from "sonner";
-import SyntaxHighlighter from "@/components/SyntaxHighlighter";
+import { SyntaxHighlighter } from "@/components/SyntaxHighlighter";
 
 interface ComparisonViewerProps {
   originalCode: string;
@@ -24,7 +23,6 @@ const ComparisonViewer = ({
     toast.success(`${type} kód vágólapra másolva`);
   };
 
-  // Generate a simple diff view (this is a basic implementation)
   const diffView = useMemo(() => {
     if (!originalCode || !convertedCode) return "";
     
