@@ -3,7 +3,6 @@ import * as parser from '@babel/parser';
 import traverse from '@babel/traverse';
 import generate from '@babel/generator';
 import * as t from '@babel/types';
-import { propTypeToTSType } from './utils/typeConverters';
 import { createTypeInterface } from './utils/interfaceGenerator';
 import { addTypeAnnotationToFunction } from './utils/functionAnnotator';
 import { isReactFunction, isReactComponent } from './utils/componentDetector';
@@ -12,6 +11,10 @@ import { isReactFunction, isReactComponent } from './utils/componentDetector';
  * Converts JSX to TSX using AST transformation
  */
 export const convertJSXToTSX = (code: string): string => {
+  if (!code) {
+    throw new Error('No code provided for conversion');
+  }
+
   try {
     const ast = parser.parse(code, {
       sourceType: 'module',
@@ -56,7 +59,10 @@ export const convertJSXToTSX = (code: string): string => {
         ) {
           const componentName = path.node.left.object.name;
           componentHasProps.set(componentName, true);
-          interfaces.push(createTypeInterface(componentName, path.node.right.properties));
+          const interfaceStr = createTypeInterface(componentName, path.node.right.properties);
+          if (interfaceStr) {
+            interfaces.push(interfaceStr);
+          }
           path.remove();
         }
       },
@@ -98,7 +104,6 @@ export const convertJSXToTSX = (code: string): string => {
       output.code,
     ].join('');
   } catch (error) {
-    console.error('Conversion failed:', error);
     throw new Error(`JSX ➝ TSX failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 };

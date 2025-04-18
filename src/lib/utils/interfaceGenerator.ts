@@ -6,6 +6,10 @@ import { propTypeToTSType } from './typeConverters';
  * Creates a TypeScript interface from propTypes
  */
 export const createTypeInterface = (componentName: string, propTypes: any): string => {
+  if (!componentName || !propTypes) {
+    return '';
+  }
+
   const properties: string[] = [];
 
   Object.entries(propTypes).forEach(([key, value]: [string, any]) => {

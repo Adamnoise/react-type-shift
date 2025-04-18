@@ -5,6 +5,8 @@ import * as t from '@babel/types';
  * Maps PropTypes to TypeScript types
  */
 export const propTypeToTSType = (propType: any): string => {
+  if (!propType) return 'any';
+  
   if (t.isMemberExpression(propType)) {
     const property = propType.property as t.Identifier;
 

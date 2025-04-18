@@ -20,7 +20,7 @@ export const addTypeAnnotationToFunction = (path: any, componentName: string, ha
   };
 
   const annotate = (fn: any) => {
-    if (!fn) return;
+    if (!fn?.body) return;
 
     if (hasProps) {
       if (fn.params && fn.params.length > 0) {
@@ -43,9 +43,7 @@ export const addTypeAnnotationToFunction = (path: any, componentName: string, ha
       fn.params = [t.identifier('props: Record<string, never>')];
     }
 
-    if (fn.body) {
-      fn.returnType = t.tsTypeAnnotation(t.tsTypeReference(t.identifier('JSX.Element')));
-    }
+    fn.returnType = t.tsTypeAnnotation(t.tsTypeReference(t.identifier('JSX.Element')));
   };
 
   annotate(path.node);
