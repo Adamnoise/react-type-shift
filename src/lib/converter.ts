@@ -6,11 +6,16 @@ import * as t from '@babel/types';
 import { createTypeInterface } from './utils/interfaceGenerator';
 import { addTypeAnnotationToFunction } from './utils/functionAnnotator';
 import { isReactFunction, isReactComponent } from './utils/componentDetector';
+import { detectHooksAndProcessTypes } from './utils/hookProcessor';
+import { ConversionConfig } from './types';
 
 /**
  * Converts JSX to TSX using AST transformation
+ * @param code - The JSX code to convert
+ * @param config - Optional conversion configuration
+ * @returns The converted TSX code
  */
-export const convertJSXToTSX = (code: string): string => {
+export const convertJSXToTSX = (code: string, config?: ConversionConfig): string => {
   if (!code) {
     throw new Error('No code provided for conversion');
   }
@@ -25,6 +30,13 @@ export const convertJSXToTSX = (code: string): string => {
     const componentNames = new Set<string>();
     const componentHasProps = new Map<string, boolean>();
     let hasReactImport = false;
+
+    // Apply conversion level-specific options
+    const conversionLevel = config?.conversionLevel || 'standard';
+    const shouldProcessHooks = conversionLevel === 'advanced';
+    const useCustomNaming = config?.customInterfaceNaming || false;
+    const namingPrefix = config?.interfacePrefix || '';
+    const namingSuffix = config?.interfaceSuffix || 'Props';
 
     // Collect data and strip propTypes
     traverse(ast, {
@@ -59,7 +71,13 @@ export const convertJSXToTSX = (code: string): string => {
         ) {
           const componentName = path.node.left.object.name;
           componentHasProps.set(componentName, true);
-          const interfaceStr = createTypeInterface(componentName, path.node.right.properties);
+          
+          const interfaceName = useCustomNaming 
+            ? `${namingPrefix}${componentName}${namingSuffix}`
+            : `${componentName}Props`;
+            
+          const interfaceStr = createTypeInterface(interfaceName, path.node.right.properties);
+          
           if (interfaceStr) {
             interfaces.push(interfaceStr);
           }
@@ -68,14 +86,29 @@ export const convertJSXToTSX = (code: string): string => {
       },
     });
 
+    // If we're in advanced mode, detect and process React hooks
+    if (shouldProcessHooks) {
+      const hookResults = detectHooksAndProcessTypes(ast);
+      if (hookResults.interfaces.length > 0) {
+        interfaces = [...interfaces, ...hookResults.interfaces];
+      }
+    }
+
     // Add typing annotations to components
     traverse(ast, {
       FunctionDeclaration(path) {
         const name = path.node.id?.name;
         if (name && componentNames.has(name)) {
           const hasProps = componentHasProps.get(name) || false;
-          addTypeAnnotationToFunction(path, name, hasProps);
-          if (!hasProps) interfaces.push(`interface ${name}Props {}`);
+          const interfaceName = useCustomNaming 
+            ? `${namingPrefix}${name}${namingSuffix}`
+            : `${name}Props`;
+            
+          addTypeAnnotationToFunction(path, interfaceName, hasProps);
+          
+          if (!hasProps) {
+            interfaces.push(`interface ${interfaceName} {}`);
+          }
         }
       },
       VariableDeclarator(path) {
@@ -87,12 +120,20 @@ export const convertJSXToTSX = (code: string): string => {
           (t.isArrowFunctionExpression(path.node.init) || t.isFunctionExpression(path.node.init))
         ) {
           const hasProps = componentHasProps.get(name) || false;
-          addTypeAnnotationToFunction({ node: path.node.init }, name, hasProps);
-          if (!hasProps) interfaces.push(`interface ${name}Props {}`);
+          const interfaceName = useCustomNaming 
+            ? `${namingPrefix}${name}${namingSuffix}`
+            : `${name}Props`;
+            
+          addTypeAnnotationToFunction({ node: path.node.init }, interfaceName, hasProps);
+          
+          if (!hasProps) {
+            interfaces.push(`interface ${interfaceName} {}`);
+          }
         }
       },
     });
 
+    // Generate code with comments
     const output = generate(ast, {
       retainLines: true,
       comments: true,
